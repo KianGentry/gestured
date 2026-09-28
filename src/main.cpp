@@ -18,6 +18,16 @@ int main() {
 
     for (const auto& camera : cameras) {
         std::cout << camera.path << ": " << camera.name << std::endl;
+
+        for (const auto& format : discover_camera_formats(camera)) {
+            std::cout << "  " << format.pixel_format << std::endl;
+
+            for (const auto& size : format.frame_sizes) {
+                std::cout << "    " << size << std::endl;
+            }
+            
+            std::cout << std::endl;
+        }
     }
 
     std::signal(SIGINT, handle_signal);
