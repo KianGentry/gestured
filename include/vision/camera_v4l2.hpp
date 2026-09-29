@@ -1,6 +1,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <cstddef>
 
 struct CameraDevice{
     std::string path;
@@ -18,6 +19,11 @@ struct CameraSettings {
     uint32_t fps;
 };
 
+struct CameraBuffer {
+    void* address;
+    std::size_t length;
+};
+
 class Camera {
 public:
     explicit Camera(const CameraDevice& device);
@@ -30,8 +36,12 @@ public:
     const CameraSettings& settings() const;
 
 private:
+    bool prepare_buffers();
+    void release_buffers();
+
     int fd_ = -1;
     CameraSettings settings_{};
+    std::vector<CameraBuffer> buffers_;
 };
 
 std::vector<CameraDevice> discover_cameras();

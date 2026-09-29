@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <utility>
+#include <sys/mman.h>
 
 namespace
 {
@@ -90,6 +91,8 @@ Camera::Camera(const CameraDevice& device)
     : fd_(open(device.path.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC)) {}
 
 Camera::~Camera() {
+    release_buffers();
+
     if (fd_ >= 0) {
         close(fd_);
     }
@@ -102,7 +105,7 @@ bool Camera::configure() {
 
     for (const auto& target : targets) {
         if (set_format(fd_, target, settings_)) {
-            return true;
+            return prepare_buffers();
         }
     }
     return false;
@@ -110,6 +113,50 @@ bool Camera::configure() {
 
 const CameraSettings& Camera::settings() const {
     return settings_;
+}
+
+bool Camera::prepare_buffers() {
+    v4l2_requestbuffers request{};
+    request.count = 2; // number of buffers
+    request.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    request.memory = V4L2_MEMORY_MMAP;
+
+    if (ioctl(fd_, VIDIOC_REQBUFS, &request) < 0 || request.count == 0) {
+        return false;
+    }
+
+    buffers_.reserve(request.count);
+
+    for (std::size_t i = 0; i < request.count; ++i) {
+        v4l2_buffer buffer{};
+        buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buffer.memory = V4L2_MEMORY_MMAP;
+        buffer.index = i;
+
+        if (ioctl(fd_, VIDIOC_QUERYBUF, &buffer) < 0) {
+            release_buffers();
+            return false;
+        }
+
+        void* address = mmap(nullptr, buffer.length, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, buffer.m.offset);
+
+        if (address == MAP_FAILED) {
+            release_buffers();
+            return false;
+        }
+
+        buffers_.push_back({address, buffer.length});
+    }
+
+    return true;
+}
+
+void Camera::release_buffers() {
+    for (auto& buffer : buffers_) {
+        munmap(buffer.address, buffer.length);
+    }
+
+    buffers_.clear();
 }
 
 std::vector<CameraDevice> discover_cameras() {

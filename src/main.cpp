@@ -36,7 +36,7 @@ int main() {
 
     std::cout << "Using " << settings.width << "x" 
     << settings.height << " at " << settings.fps << "fps" << std::endl;
-
+/*
     for (const auto& device : cameras) {
         std::cout << device.path << ": " << device.name << std::endl;
 
@@ -50,7 +50,7 @@ int main() {
             std::cout << std::endl;
         }
     }
-
+*/
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
 
