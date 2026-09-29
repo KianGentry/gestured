@@ -2,8 +2,9 @@
 #include <csignal>
 #include <iostream>
 #include <thread>
-
+#include <vector>
 #include "vision/camera_v4l2.hpp"
+#include "vision/mjpeg_decoder.hpp"
 
 namespace 
 {
@@ -24,7 +25,7 @@ int main() {
         return 1;
     }
 
-    // configure the first compatible camera before loop
+    // camera config
     Camera camera(cameras.front());
 
     if (!camera.configure()) {
@@ -37,6 +38,7 @@ int main() {
     std::cout << "Using " << settings.width << "x" 
     << settings.height << " at " << settings.fps << "fps" << std::endl;
 
+    // capture frame
     std::vector<uint8_t> frame;
     if (!camera.capture_frame(frame)) {
         std::cerr << "Failed to capture frame" << std::endl;
@@ -44,6 +46,17 @@ int main() {
     }
 
     std::cout << "Captured frame, size " << frame.size() << "B" << std::endl;
+
+    // decode frame
+    std::vector<uint8_t> rgb;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    if (!decode_mjpeg(frame, rgb, width, height)) {
+        std::cerr << "Failed to decode MJPEG frame" << std::endl;
+        return 1;
+    }
+
+    std::cout << "Decoded frame" << width << "x" << height << ", size " << rgb.size() << "B" << std::endl;
 /*
     for (const auto& device : cameras) {
         std::cout << device.path << ": " << device.name << std::endl;
