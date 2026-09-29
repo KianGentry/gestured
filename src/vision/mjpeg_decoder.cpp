@@ -1,7 +1,6 @@
 #include "vision/mjpeg_decoder.hpp"
 #include <csetjmp>
-// jpeglib.h
-#include <stdio.h>
+#include <stdio.h> // for jpeglib.h
 #include <jpeglib.h>
 
 namespace
