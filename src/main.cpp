@@ -36,6 +36,14 @@ int main() {
 
     std::cout << "Using " << settings.width << "x" 
     << settings.height << " at " << settings.fps << "fps" << std::endl;
+
+    std::vector<uint8_t> frame;
+    if (!camera.capture_frame(frame)) {
+        std::cerr << "Failed to capture frame" << std::endl;
+        return 1;
+    }
+
+    std::cout << "Captured frame, size " << frame.size() << "B" << std::endl;
 /*
     for (const auto& device : cameras) {
         std::cout << device.path << ": " << device.name << std::endl;

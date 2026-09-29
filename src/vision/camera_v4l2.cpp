@@ -5,6 +5,8 @@
 #include <sys/ioctl.h>
 #include <utility>
 #include <sys/mman.h>
+#include <poll.h>
+#include <cstring>
 
 namespace
 {
@@ -157,6 +159,48 @@ void Camera::release_buffers() {
     }
 
     buffers_.clear();
+}
+
+bool Camera::capture_frame(std::vector<uint8_t>& frame) {
+    for (unsigned int i = 0; i < buffers_.size(); ++i) {
+        v4l2_buffer buffer{};
+        buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buffer.memory = V4L2_MEMORY_MMAP;
+        buffer.index = i;
+
+        if (ioctl(fd_, VIDIOC_QBUF, &buffer) < 0) {
+            return false;
+        }
+    }
+
+    v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+
+    if (ioctl(fd_, VIDIOC_STREAMON, &type) < 0) {
+        return false;
+    }
+
+    pollfd descriptor(fd_, POLLIN, 0);
+
+    if (poll(&descriptor, 1, 1000) < 0) {
+        ioctl(fd_, VIDIOC_STREAMOFF, &type);
+        return false;
+    }
+
+    v4l2_buffer buffer{};
+    buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buffer.memory = V4L2_MEMORY_MMAP;
+
+    const bool captured = ioctl(fd_, VIDIOC_DQBUF, &buffer) == 0 && buffer.index < buffers_.size();
+
+    if (captured) {
+        const auto* source = static_cast<const uint8_t*>(buffers_[buffer.index].address);
+
+        frame.assign(source, source + buffer.bytesused);
+        ioctl(fd_, VIDIOC_QBUF, &buffer);
+    }
+
+    ioctl(fd_, VIDIOC_STREAMOFF, &type);
+    return captured;
 }
 
 std::vector<CameraDevice> discover_cameras() {

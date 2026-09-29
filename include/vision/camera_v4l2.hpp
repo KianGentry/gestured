@@ -35,6 +35,8 @@ public:
     bool configure();
     const CameraSettings& settings() const;
 
+    bool capture_frame(std::vector<uint8_t>& frame);
+
 private:
     bool prepare_buffers();
     void release_buffers();
