@@ -36,8 +36,11 @@ public:
     const CameraSettings& settings() const;
 
     bool capture_frame(std::vector<uint8_t>& frame);
+    bool start_streaming();
+    void stop_streaming();
 
 private:
+    bool streaming_ = false;
     bool prepare_buffers();
     void release_buffers();
 

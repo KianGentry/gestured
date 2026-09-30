@@ -37,7 +37,7 @@ int main() {
 
     std::cout << "Using " << settings.width << "x" 
     << settings.height << " at " << settings.fps << "fps" << std::endl;
-
+/*
     // capture frame
     std::vector<uint8_t> frame;
     if (!camera.capture_frame(frame)) {
@@ -57,7 +57,7 @@ int main() {
     }
 
     std::cout << "Decoded frame" << width << "x" << height << ", size " << rgb.size() << "B" << std::endl;
-/*
+
     for (const auto& device : cameras) {
         std::cout << device.path << ": " << device.name << std::endl;
 
@@ -75,8 +75,41 @@ int main() {
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
 
+    // start_streaming()
+    if (!camera.start_streaming()) {
+        std::cerr << "Failed to start camera stream" << std::endl;
+        return 1;
+    }
+
+    std::vector<uint8_t> frame;
+    std::vector<uint8_t> rgb;
+    std::uint64_t frame_count = 0;
+    std::uint64_t reported_frames = 0;
+    auto report_time = std::chrono::steady_clock::now();
+
     while(running) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        uint32_t width = 0;
+        uint32_t height = 0;
+
+        if (!camera.capture_frame(frame) || !decode_mjpeg(frame, rgb, width, height)) {
+            if (running) {
+                std::cerr << "Failed to process frame" << std::endl;
+            }
+            break;
+        }
+
+        ++frame_count;
+        ++reported_frames;
+
+        const auto now = std::chrono::steady_clock::now();
+        const auto elapsed = now - report_time;
+
+        if (elapsed >= std::chrono::seconds(1)) {
+            const double seconds = std::chrono::duration<double>(elapsed).count();
+            std::cout << "Processed " << frame_count << " frames, " << reported_frames / seconds << " fps" << std::endl;
+            reported_frames = 0;
+            report_time = now;
+        }
     }
     return 0;
 }

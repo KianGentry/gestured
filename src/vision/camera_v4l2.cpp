@@ -7,6 +7,8 @@
 #include <sys/mman.h>
 #include <poll.h>
 #include <cstring>
+#include <iostream>
+#include <cerrno>
 
 namespace
 {
@@ -20,8 +22,8 @@ struct Target {
 };
 
 constexpr Target targets[] = {
-    {1920, 1080, 60, 24, 60},
-    {1280, 720, 24, 24, 60}
+    {1920, 1080, 30, 24, 30},
+    {1280, 720, 24, 24, 30}
 };
 
 bool set_format(int fd, const Target& target, CameraSettings& settings) {
@@ -52,6 +54,7 @@ bool set_format(int fd, const Target& target, CameraSettings& settings) {
 
     const auto& interval = stream.parm.capture.timeperframe;
 
+    std::cout << "driver interval " << interval.numerator << "/" << interval.denominator << std::endl;
     if (interval.numerator == 0) {
         return false;
     }
@@ -93,6 +96,7 @@ Camera::Camera(const CameraDevice& device)
     : fd_(open(device.path.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC)) {}
 
 Camera::~Camera() {
+    stop_streaming();
     release_buffers();
 
     if (fd_ >= 0) {
@@ -119,7 +123,7 @@ const CameraSettings& Camera::settings() const {
 
 bool Camera::prepare_buffers() {
     v4l2_requestbuffers request{};
-    request.count = 2; // number of buffers
+    request.count = 4; // number of buffers
     request.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     request.memory = V4L2_MEMORY_MMAP;
 
@@ -162,45 +166,53 @@ void Camera::release_buffers() {
 }
 
 bool Camera::capture_frame(std::vector<uint8_t>& frame) {
-    for (unsigned int i = 0; i < buffers_.size(); ++i) {
+    if (!streaming_) {
+        return false;
+    }
+
+    pollfd descriptor{};
+    descriptor.fd = fd_;
+    descriptor.events = POLLIN;
+/*
+    if (poll(&descriptor, 1, 1000) < 0 || !(descriptor.revents & POLLIN)) {
+        return false;
+    }
+*/
+
+    for (;;) {
+        const int result = poll(&descriptor, 1, 1000);
+
+        if (result < 0 && errno == EINTR) {
+            continue;
+        }
+        if (result <= 0 || !(descriptor.revents & POLLIN)) {
+            return false;
+        }
+
         v4l2_buffer buffer{};
         buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         buffer.memory = V4L2_MEMORY_MMAP;
-        buffer.index = i;
+
+        if (ioctl(fd_, VIDIOC_DQBUF, &buffer) < 0) {
+            if (errno == EAGAIN) {
+                continue;
+            }
+            return false;
+        }
+
+        if (buffer.index >= buffers_.size() || buffer.bytesused > buffers_[buffer.index].length) {
+            return false;
+        }
+
+        const auto* source = static_cast<const uint8_t*>(buffers_[buffer.index].address);
+        frame.assign(source, source + buffer.bytesused);
 
         if (ioctl(fd_, VIDIOC_QBUF, &buffer) < 0) {
             return false;
         }
+
+        return true;
     }
-
-    v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-
-    if (ioctl(fd_, VIDIOC_STREAMON, &type) < 0) {
-        return false;
-    }
-
-    pollfd descriptor(fd_, POLLIN, 0);
-
-    if (poll(&descriptor, 1, 1000) < 0) {
-        ioctl(fd_, VIDIOC_STREAMOFF, &type);
-        return false;
-    }
-
-    v4l2_buffer buffer{};
-    buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buffer.memory = V4L2_MEMORY_MMAP;
-
-    const bool captured = ioctl(fd_, VIDIOC_DQBUF, &buffer) == 0 && buffer.index < buffers_.size();
-
-    if (captured) {
-        const auto* source = static_cast<const uint8_t*>(buffers_[buffer.index].address);
-
-        frame.assign(source, source + buffer.bytesused);
-        ioctl(fd_, VIDIOC_QBUF, &buffer);
-    }
-
-    ioctl(fd_, VIDIOC_STREAMOFF, &type);
-    return captured;
 }
 
 std::vector<CameraDevice> discover_cameras() {
@@ -274,4 +286,36 @@ std::vector<CameraFormat> discover_camera_formats(const CameraDevice& camera) {
 
     close(fd);
     return formats;
+}
+
+bool Camera::start_streaming() {
+    for (unsigned int i = 0; i < buffers_.size(); ++i) {
+        v4l2_buffer buf{};
+        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buf.memory = V4L2_MEMORY_MMAP;
+        buf.index = i;
+
+        if (ioctl(fd_, VIDIOC_QBUF, &buf) < 0) {
+            return false;
+        }
+    }
+
+    v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+
+    if (ioctl(fd_, VIDIOC_STREAMON, &type) < 0) {
+        return false;
+    }
+
+    streaming_ = true;
+    return true;
+}
+
+void Camera::stop_streaming() {
+    if (!streaming_) {
+        return;
+    }
+
+    v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    ioctl(fd_, VIDIOC_STREAMOFF, &type);
+    streaming_ = false;
 }
