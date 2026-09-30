@@ -5,6 +5,7 @@
 #include <vector>
 #include "vision/camera_v4l2.hpp"
 #include "vision/mjpeg_decoder.hpp"
+#include "vision/onnx_tracker.hpp"
 
 namespace 
 {
@@ -37,6 +38,15 @@ int main() {
 
     std::cout << "Using " << settings.width << "x" 
     << settings.height << " at " << settings.fps << "fps" << std::endl;
+
+    // onnx tracker
+    OnnxTracker tracker("models/hand_landmark_int8.onnx");
+
+    if (!tracker.initialise()) {
+        std::cerr << "Failed to initialise tracker" << std::endl;
+        return 1;
+    }
+    std::cout << tracker.input_description() << std::endl;
 /*
     // capture frame
     std::vector<uint8_t> frame;
