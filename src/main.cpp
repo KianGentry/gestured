@@ -40,7 +40,9 @@ int main() {
     << settings.height << " at " << settings.fps << "fps" << std::endl;
 
     // onnx tracker (initialise)
-    OnnxTracker tracker("models/hand_landmark_int8.onnx");
+    OnnxTracker tracker(
+        "models/palm_detection_full_inf_post_192x192.onnx",
+        "models/hand_landmark_sparse_Nx3x224x224.onnx");
 
     if (!tracker.initialise()) {
         std::cerr << "Failed to initialise tracker" << std::endl;
@@ -103,6 +105,8 @@ int main() {
     std::vector<uint8_t> rgb;
     std::uint64_t frame_count = 0;
     std::uint64_t reported_frames = 0;
+    std::uint64_t detected_frames = 0;
+    std::uint64_t landmark_frames = 0;
     auto report_time = std::chrono::steady_clock::now();
 
     while(running) {
@@ -116,6 +120,14 @@ int main() {
             break;
         }
 
+        const auto palms = tracker.detect_palms(rgb, width, height);
+        if (!palms.empty()) {
+            ++detected_frames;
+        }
+        if (!tracker.detect_landmarks(rgb, width, height, palms).empty()) {
+            ++landmark_frames;
+        }
+
         ++frame_count;
         ++reported_frames;
 
@@ -124,8 +136,13 @@ int main() {
 
         if (elapsed >= std::chrono::seconds(1)) {
             const double seconds = std::chrono::duration<double>(elapsed).count();
-            std::cout << "Processed " << frame_count << " frames, " << reported_frames / seconds << " fps" << std::endl;
+            std::cout << "Processed " << frame_count << " frames, "
+                      << reported_frames / seconds << " fps, palms in "
+                      << detected_frames << " frames, landmarks in "
+                      << landmark_frames << " frames" << std::endl;
             reported_frames = 0;
+            detected_frames = 0;
+            landmark_frames = 0;
             report_time = now;
         }
     }
