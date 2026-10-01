@@ -39,7 +39,7 @@ int main() {
     std::cout << "Using " << settings.width << "x" 
     << settings.height << " at " << settings.fps << "fps" << std::endl;
 
-    // onnx tracker
+    // onnx tracker (initialise)
     OnnxTracker tracker("models/hand_landmark_int8.onnx");
 
     if (!tracker.initialise()) {
@@ -47,6 +47,14 @@ int main() {
         return 1;
     }
     std::cout << tracker.input_description() << std::endl;
+
+    // onnx inference test
+    if (!tracker.run_test()) {
+        std::cerr << "Inference test failed" << std::endl;
+        return 1;
+    }
+
+    std::cout << "onnx inference test passed" << std::endl;
 /*
     // capture frame
     std::vector<uint8_t> frame;

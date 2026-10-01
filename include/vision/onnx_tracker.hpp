@@ -8,11 +8,11 @@ public:
 
     bool initialise();
     const std::string& input_description() const;
+    bool run_test();
 
 private:
     std::string model_path_;
     std::string input_description_;
     struct State;
     std::unique_ptr<State> state_;
-
 };
