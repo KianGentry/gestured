@@ -27,7 +27,7 @@ constexpr Target targets[] = {
 };
 
 bool set_format(int fd, const Target& target, CameraSettings& settings) {
-    // ask the driver for preferred mpjg dimensions
+    // request target mjpeg dimensions, reject a different negotiated mode
     v4l2_format format{};
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     format.fmt.pix.width = target.width;
@@ -42,7 +42,7 @@ bool set_format(int fd, const Target& target, CameraSettings& settings) {
         return false;
     }
 
-    // request target frame rate and validate what the driver accepted.
+    // request target frame rate, validate the driver response
     v4l2_streamparm stream{};
     stream.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     stream.parm.capture.timeperframe.numerator = 1;
@@ -55,12 +55,14 @@ bool set_format(int fd, const Target& target, CameraSettings& settings) {
     const auto& interval = stream.parm.capture.timeperframe;
 
     std::cout << "driver interval " << interval.numerator << "/" << interval.denominator << std::endl;
+    // a zero numerator cannot describe a usable frame interval
     if (interval.numerator == 0) {
         return false;
     }
 
     const uint32_t actual_fps = interval.denominator / interval.numerator;
 
+    // stay within the supported rate range, reject unsuitable camera modes
     if (actual_fps < target.minimum_fps || actual_fps > target.maximum_fps) {
         return false;
     }
@@ -75,6 +77,7 @@ bool set_format(int fd, const Target& target, CameraSettings& settings) {
 }
 
 std::string fourcc_to_string(__u32 value) {
+    // unpack the four format characters, add a string terminator
     char name[5] = {
         static_cast<char>(value & 0xff),
         static_cast<char>((value >> 8) & 0xff),
@@ -87,15 +90,18 @@ std::string fourcc_to_string(__u32 value) {
 }
 
 int open_camera(const CameraDevice& camera) {
+    // open for device queries, no write access needed
     return open(camera.path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
 }
 
 }; // namespace
 
 Camera::Camera(const CameraDevice& device)
+    // keep the device open for configuration and streaming
     : fd_(open(device.path.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC)) {}
 
 Camera::~Camera() {
+    // stop device activity, unmap buffers, close the file descriptor
     stop_streaming();
     release_buffers();
 
@@ -105,10 +111,12 @@ Camera::~Camera() {
 }
 
 bool Camera::configure() {
+    // a failed open leaves no device to configure
     if (fd_ < 0) {
         return false;
     }
 
+    // try preferred capture modes in order, prepare buffers for the first match
     for (const auto& target : targets) {
         if (set_format(fd_, target, settings_)) {
             return prepare_buffers();
@@ -118,10 +126,12 @@ bool Camera::configure() {
 }
 
 const CameraSettings& Camera::settings() const {
+    // expose the mode accepted by the camera driver
     return settings_;
 }
 
 bool Camera::prepare_buffers() {
+    // request driver owned capture buffers, accessed through memory mapping
     v4l2_requestbuffers request{};
     request.count = 4; // number of buffers
     request.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -134,6 +144,7 @@ bool Camera::prepare_buffers() {
     buffers_.reserve(request.count);
 
     for (std::size_t i = 0; i < request.count; ++i) {
+        // query each buffer before mapping its memory into this process
         v4l2_buffer buffer{};
         buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         buffer.memory = V4L2_MEMORY_MMAP;
@@ -158,6 +169,7 @@ bool Camera::prepare_buffers() {
 }
 
 void Camera::release_buffers() {
+    // release every mapping created during buffer preparation
     for (auto& buffer : buffers_) {
         munmap(buffer.address, buffer.length);
     }
@@ -166,6 +178,7 @@ void Camera::release_buffers() {
 }
 
 bool Camera::capture_frame(std::vector<uint8_t>& frame) {
+    // capture requires an active stream
     if (!streaming_) {
         return false;
     }
@@ -180,6 +193,7 @@ bool Camera::capture_frame(std::vector<uint8_t>& frame) {
 */
 
     for (;;) {
+        // wait for a completed frame, retry interrupted waits
         const int result = poll(&descriptor, 1, 1000);
 
         if (result < 0 && errno == EINTR) {
@@ -194,12 +208,14 @@ bool Camera::capture_frame(std::vector<uint8_t>& frame) {
         buffer.memory = V4L2_MEMORY_MMAP;
 
         if (ioctl(fd_, VIDIOC_DQBUF, &buffer) < 0) {
+            // non blocking devices may report no completed buffer yet
             if (errno == EAGAIN) {
                 continue;
             }
             return false;
         }
 
+        // reject invalid driver indices, avoid reading past the mapped buffer
         if (buffer.index >= buffers_.size() || buffer.bytesused > buffers_[buffer.index].length) {
             return false;
         }
@@ -207,6 +223,7 @@ bool Camera::capture_frame(std::vector<uint8_t>& frame) {
         const auto* source = static_cast<const uint8_t*>(buffers_[buffer.index].address);
         frame.assign(source, source + buffer.bytesused);
 
+        // return the buffer to the driver, ready for the next frame
         if (ioctl(fd_, VIDIOC_QBUF, &buffer) < 0) {
             return false;
         }
@@ -218,7 +235,7 @@ bool Camera::capture_frame(std::vector<uint8_t>& frame) {
 std::vector<CameraDevice> discover_cameras() {
     std::vector<CameraDevice> devices;
 
-    // video devices numbered by kernel and might have som gaps
+    // scan numbered video devices, missing numbers are normal
     for (int i = 0; i < 64; ++i) {
         const std::string path = "/dev/video" + std::to_string(i);
         const int fd = open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
@@ -227,6 +244,7 @@ std::vector<CameraDevice> discover_cameras() {
             continue;
         }
 
+        // only keep devices supporting both capture and streaming
         v4l2_capability cap{};
         const bool queried = ioctl(fd, VIDIOC_QUERYCAP, &cap) == 0;
         const bool capture =
@@ -246,12 +264,14 @@ std::vector<CameraDevice> discover_cameras() {
 
 std::vector<CameraFormat> discover_camera_formats(const CameraDevice& camera) {
     std::vector<CameraFormat> formats;
+    // use a temporary descriptor for format queries
     const int fd = open_camera(camera);
 
     if (fd < 0) {
         return formats;
     }
 
+    // enumerate formats until the driver reports no further entries
     for (unsigned int i = 0; ; ++i) {
         v4l2_fmtdesc desc{};
         desc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -264,6 +284,7 @@ std::vector<CameraFormat> discover_camera_formats(const CameraDevice& camera) {
         CameraFormat format;
         format.pixel_format = fourcc_to_string(desc.pixelformat);
 
+        // collect each advertised frame size for this pixel format
         for (unsigned int size_index = 0; ; ++size_index) {
             v4l2_frmsizeenum frmsize{};
             frmsize.pixel_format = desc.pixelformat;
@@ -289,6 +310,7 @@ std::vector<CameraFormat> discover_camera_formats(const CameraDevice& camera) {
 }
 
 bool Camera::start_streaming() {
+    // hand all mapped buffers to the driver before starting capture
     for (unsigned int i = 0; i < buffers_.size(); ++i) {
         v4l2_buffer buf{};
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -300,6 +322,7 @@ bool Camera::start_streaming() {
         }
     }
 
+    // begin capture only after every buffer is queued
     v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 
     if (ioctl(fd_, VIDIOC_STREAMON, &type) < 0) {
@@ -311,6 +334,7 @@ bool Camera::start_streaming() {
 }
 
 void Camera::stop_streaming() {
+    // repeated shutdown calls need no further driver request
     if (!streaming_) {
         return;
     }
