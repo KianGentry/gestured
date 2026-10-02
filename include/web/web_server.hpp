@@ -1,0 +1,26 @@
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
+struct WebSnapshot {
+    std::vector<uint8_t> jpeg;
+    std::string tracking_json = "{}";
+};
+
+class WebServer {
+public:
+    explicit WebServer(std::uint16_t port = 2026);
+    ~WebServer();
+
+    WebServer(const WebServer&) = delete;
+    WebServer& operator=(const WebServer&) = delete;
+
+    void publish(WebSnapshot snapshot);
+    bool start();
+    void stop();
+
+private:
+    struct State;
+    std::unique_ptr<State> state_;
+};
