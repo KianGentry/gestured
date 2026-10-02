@@ -30,6 +30,7 @@ function polygon(points, colour) {
     context.stroke();
 }
 
+// redraw palm boxes, hand connections, landmarks over the current frame
 function draw() {
     // wait for image dimensions before drawing the overlay
     if (!canvas.width || !canvas.height) return;
@@ -66,6 +67,7 @@ function draw() {
     }
 }
 
+// fetch the latest tracking snapshot, refresh the overlay
 async function updateTracking() {
     try {
         // avoid cached responses, tracking should reflect the latest frame
@@ -80,6 +82,7 @@ async function updateTracking() {
     setTimeout(updateTracking, 100);
 }
 
+// refresh the camera image, align the overlay canvas
 function updateFrame() {
     image.onload = () => {
         // match overlay coordinates to the decoded camera frame
@@ -92,7 +95,7 @@ function updateFrame() {
     // retry more slowly when no frame is available
     image.onerror = () => setTimeout(updateFrame, 500);
     // query parameter avoids reusing a cached jpeg
-    image.src = "/frame.jpg?t=" + Date.now();
+    image.src = "/stream.mjpg?t=" + Date.now();
 }
 
 // start both refresh loops

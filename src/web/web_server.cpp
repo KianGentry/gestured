@@ -15,6 +15,47 @@ struct WebServer::State {
     WebSnapshot latest;
     httplib::Server server;
     std::thread worker;
+    std::condition_variable updated;
+    std::uint64_t sequence = 0;
+    bool stopping = false;
+
+    void write_stream(httplib::DataSink& sink) {
+        std::uint64_t last_sequence = 0;
+
+        while (sink.is_writable()) {
+            std::vector<std::uint8_t> jpeg;
+
+            std::unique_lock lock(mutex);
+            updated.wait(lock, [&] {
+                return sequence != last_sequence || stopping;
+            });
+            if (stopping) return;
+            jpeg = latest.jpeg;
+            last_sequence = sequence;
+
+            const std::string header = "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " 
+                + std::to_string(jpeg.size()) + "\r\n\r\n";
+            
+            if (!sink.write(header.data(), header.size()) 
+            || !sink.write(reinterpret_cast<const char*>(jpeg.data()), jpeg.size()) 
+            || !sink.write("\r\n", 2)) {
+                return;
+            }
+        }
+    }
+
+    void register_routes() {
+        server.set_mount_point("/", GESTURED_WEBUI_DIR);
+
+        server.Get("/stream.mjpg",[this](const httplib::Request&, httplib::Response& response) {
+            response.set_chunked_content_provider("multipart/x-mixed-replace; boundary=frame",
+                [this](size_t, httplib::DataSink& sink) {
+                write_stream(sink);
+                return false;
+            });
+        });
+    }
+
 };
 
 WebServer::WebServer(std::uint16_t port) : state_(std::make_unique<State>(port)) {}
@@ -28,51 +69,29 @@ void WebServer::publish(WebSnapshot snapshot) {
     // protect shared data, move in the latest camera snapshot
     std::lock_guard lock(state_->mutex);
     state_->latest = std::move(snapshot);
+    ++state_->sequence;
+    state_->updated.notify_all();
 }
 
 bool WebServer::start() {
     // do not start a second worker for the same server
     if (state_->worker.joinable()) return false;
 
-    // serve the web interface files from the configured directory
-    state_->server.set_mount_point("/", GESTURED_WEBUI_DIR);
-    state_->server.Get("/frame.jpg", [this](const httplib::Request&, httplib::Response& response) {
-        std::vector<std::uint8_t> jpeg;
-        // take a consistent copy, publish may update the snapshot concurrently
-        std::lock_guard lock(state_->mutex);
-        jpeg = state_->latest.jpeg;
-
-        // report unavailable until the first camera frame arrives
-        if (jpeg.empty()) {
-            response.status = 503;
-            response.set_content("No frame", "text/plain");
-            return;
-        }
-
-        response.set_content(reinterpret_cast<const char*>(jpeg.data()), jpeg.size(), "image/jpeg");
-    });
-
-    // expose current tracking data as a json response
-    state_->server.Get("/tracking.json", [this](const httplib::Request&, httplib::Response& response) {
-        std::string json;
-        // protect the snapshot while copying its tracking data
-        std::lock_guard lock(state_->mutex);
-        json = state_->latest.tracking_json;
-        response.set_content(json, "application/json");
-    });
-
-    // bind to loopback, keep the web interface local to this machine
+    state_->register_routes();
+    // start the server worker thread
     if (!state_->server.bind_to_port("127.0.0.1", state_->port)) return false;
 
-    // run the blocking request loop on a worker thread
-    state_->worker = std::thread([this]{
-        state_->server.listen_after_bind();
+    state_->worker = std::thread([state = state_.get()] {
+        state->server.listen_after_bind();
     });
 
     return true;
 }
 
 void WebServer::stop() {
+    std::lock_guard lock(state_->mutex);
+    state_->stopping = true;
+    state_->updated.notify_all();
     // ask the request loop to exit, then wait for its thread to finish
     state_->server.stop();
     

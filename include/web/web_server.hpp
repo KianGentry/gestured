@@ -2,6 +2,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <condition_variable>
 
 struct WebSnapshot {
     std::vector<uint8_t> jpeg;

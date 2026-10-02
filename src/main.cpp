@@ -6,6 +6,7 @@
 #include "vision/camera_v4l2.hpp"
 #include "vision/mjpeg_decoder.hpp"
 #include "vision/onnx_tracker.hpp"
+#include "web/web_server.hpp"
 
 namespace 
 {
@@ -104,6 +105,14 @@ int main() {
         return 1;
     }
 
+    // serve the web ui, expose frame and tracking routes
+    WebServer web_server(2026);
+    if (!web_server.start()) {
+        std::cerr << "Failed to start web server on http://127.0.0.1:2026" << std::endl;
+        return 1;
+    }
+    std::cout << "Web server started on http://127.0.0.1:2026" << std::endl;
+
     std::vector<uint8_t> frame;
     std::vector<uint8_t> rgb;
     std::uint64_t frame_count = 0;
@@ -134,6 +143,12 @@ int main() {
         if (!tracker.detect_landmarks(rgb, width, height, palms).empty()) {
             ++landmark_frames;
         }
+
+        // publish compressed camera frame, tracking payload currently empty
+        WebSnapshot snapshot;
+        snapshot.jpeg = frame;
+        snapshot.tracking_json = "{}";
+        web_server.publish(std::move(snapshot));
 
         ++frame_count;
         ++reported_frames;
