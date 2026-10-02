@@ -13,6 +13,7 @@ struct PalmDetection {
 
 struct HandLandmarkResult {
     std::array<float, 63> xyz;
+    std::array<float, 42> frame_xy;
     float score;
     float right_hand;
 };

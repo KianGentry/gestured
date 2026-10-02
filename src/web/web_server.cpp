@@ -54,6 +54,13 @@ struct WebServer::State {
                 return false;
             });
         });
+
+        server.Get("/tracking.json",[this](const httplib::Request&, httplib::Response& response) {
+            std::string json;
+            std::lock_guard lock(mutex);
+            json = latest.tracking_json;
+            response.set_content(json, "application/json");
+        });
     }
 
 };

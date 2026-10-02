@@ -92,12 +92,14 @@ bool run_model_test(Model& model, const char* label) {
     Ort::AllocatorWithDefaultOptions allocator;
     std::vector<Ort::AllocatedStringPtr> output_storage;
     std::vector<const char*> output_names;
+
     // allocated output names stay alive, run call pointer use
     for (std::size_t i = 0; i < model.session->GetOutputCount(); ++i) {
         output_storage.push_back(model.session->GetOutputNameAllocated(i, allocator));
         output_names.push_back(output_storage.back().get());
         const auto output_info = model.session->GetOutputTypeInfo(i);
         const auto output_shape = output_info.GetTensorTypeAndShapeInfo().GetShape();
+
         std::cout << label << " output " << i << ": " << output_names.back() << " [";
         for (std::size_t j = 0; j < output_shape.size(); ++j) {
             if (j > 0) std::cout << ",";
@@ -299,8 +301,8 @@ std::vector<PalmDetection> OnnxTracker::detect_palms(
 }
 
 std::vector<HandLandmarkResult> OnnxTracker::detect_landmarks(
-    const std::vector<uint8_t>& rgb, uint32_t width, uint32_t height,
-    const std::vector<PalmDetection>& palms) {
+const std::vector<uint8_t>& rgb, uint32_t width, uint32_t height,
+const std::vector<PalmDetection>& palms) {
     std::vector<HandLandmarkResult> results;
     // skip landmark inference, no palms, invalid frame, unloaded model
     if (palms.empty() || rgb.size() != static_cast<std::size_t>(width) * height * 3 ||
@@ -309,8 +311,8 @@ std::vector<HandLandmarkResult> OnnxTracker::detect_landmarks(
     // batched landmark inference, one rotated crop per palm
     auto input = make_landmark_input(rgb, width, height, palms);
     const auto memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-    const std::vector<int64_t> shape = {
-        static_cast<int64_t>(palms.size()), 3, 224, 224};
+    const std::vector<int64_t> shape = {static_cast<int64_t>(palms.size()), 3, 224, 224};
+
     Ort::Value tensor = Ort::Value::CreateTensor<float>(
         memory_info, input.data(), input.size(), shape.data(), shape.size());
 
@@ -318,18 +320,22 @@ std::vector<HandLandmarkResult> OnnxTracker::detect_landmarks(
         Ort::AllocatorWithDefaultOptions allocator;
         std::vector<Ort::AllocatedStringPtr> output_storage;
         std::vector<const char*> output_names;
+
         // output names vary by model, retain allocated names for inference
         for (std::size_t i = 0; i < state_->landmark.session->GetOutputCount(); ++i) {
             output_storage.push_back(state_->landmark.session->GetOutputNameAllocated(i, allocator));
             output_names.push_back(output_storage.back().get());
         }
+
         const char* input_names[] = {state_->landmark.input_name.c_str()};
         const auto outputs = state_->landmark.session->Run(
-            Ort::RunOptions{nullptr}, input_names, &tensor, 1,
-            output_names.data(), output_names.size());
+        Ort::RunOptions{nullptr}, input_names, &tensor, 1,
+        output_names.data(), output_names.size());
+
         const float* xyz = outputs[0].GetTensorData<float>();
         const float* scores = outputs[1].GetTensorData<float>();
         const float* hands = outputs[2].GetTensorData<float>();
+
         // model outputs, 21 xyz points, confidence score, right hand score per crop
         for (std::size_t i = 0; i < palms.size(); ++i) {
             // confidence filter, keep low quality crops from caller
@@ -337,6 +343,22 @@ std::vector<HandLandmarkResult> OnnxTracker::detect_landmarks(
             HandLandmarkResult result{};
             // one hand, 21 points, three coordinates each
             std::copy_n(xyz + i * 63, 63, result.xyz.begin());
+
+            const auto& palm = palms[i];
+            const float half_size = palm.size * static_cast<float>(std::max(width, height) * 0.5f);
+            const float center_x = palm.center_x * width;
+            const float center_y = palm.center_y * height;
+            const float sine = std::sin(palm.rotation);
+            const float cosine = std::cos(palm.rotation);
+
+            for (std::size_t point = 0; point < 21; ++point) {
+                const float local_x = (xyz[i * 63 + point * 3] / 224.0f - 0.5f) * 2.0f * half_size;
+                const float local_y = (xyz[i * 63 + point * 3 + 1] / 224.0f - 0.5f) * 2.0f * half_size;
+
+                result.frame_xy[point * 2] = (center_x + cosine * local_x - sine * local_y) / width;
+                result.frame_xy[point * 2 + 1] = (center_y + sine * local_x + cosine * local_y) / height;
+            }
+
             result.score = scores[i];
             result.right_hand = hands[i];
             results.push_back(result);

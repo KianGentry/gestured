@@ -7,6 +7,7 @@
 #include "vision/mjpeg_decoder.hpp"
 #include "vision/onnx_tracker.hpp"
 #include "web/web_server.hpp"
+#include <sstream>
 
 namespace 
 {
@@ -22,6 +23,7 @@ void handle_signal(int) {
 } // namespace
 
 int main() {
+
     // find usable video capture devices before setting up inference
     const auto cameras = discover_cameras();
 
@@ -135,19 +137,36 @@ int main() {
             break;
         }
 
-        // find palms first, use those crops for landmark inference
         const auto palms = tracker.detect_palms(rgb, width, height);
+        const auto hands = tracker.detect_landmarks(rgb, width, height, palms);
         if (!palms.empty()) {
             ++detected_frames;
         }
-        if (!tracker.detect_landmarks(rgb, width, height, palms).empty()) {
+        if (!hands.empty()) {
             ++landmark_frames;
         }
+
+
 
         // publish compressed camera frame, tracking payload currently empty
         WebSnapshot snapshot;
         snapshot.jpeg = frame;
-        snapshot.tracking_json = "{}";
+
+        std::ostringstream tracking;
+
+        tracking << "{\"palms\":[],\"hands\":[";
+        for (std::size_t i = 0; i < hands.size(); ++i) {
+            if (i) tracking << ",";
+            tracking << "{\"landmarks\":[";
+            for (std::size_t point = 0; point < 21; ++point) {
+                if (point) tracking << ",";
+                tracking << "[" << hands[i].frame_xy[point * 2] << "," << hands[i].frame_xy[point * 2 + 1] << "]";
+            }
+            tracking << "]}";
+        }
+        tracking << "]}";
+        snapshot.tracking_json = tracking.str();
+
         web_server.publish(std::move(snapshot));
 
         ++frame_count;

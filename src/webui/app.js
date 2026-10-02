@@ -82,6 +82,7 @@ async function updateTracking() {
     setTimeout(updateTracking, 100);
 }
 
+/*
 // refresh the camera image, align the overlay canvas
 function updateFrame() {
     image.onload = () => {
@@ -97,7 +98,16 @@ function updateFrame() {
     // query parameter avoids reusing a cached jpeg
     image.src = "/stream.mjpg?t=" + Date.now();
 }
+*/
 
-// start both refresh loops
-updateFrame();
+image.addEventListener("load", () => {
+    // match overlay coordinates to the decoded camera frame
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    draw();
+});
+image.src = "/stream.mjpg";
+// start refresh loops
+
+//updateFrame();
 updateTracking();
