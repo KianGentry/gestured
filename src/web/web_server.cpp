@@ -6,8 +6,6 @@
 #include <thread>
 #include <utility>
 
-#define GESTURED_WEBUI_DIR "src/webui"
-
 struct WebServer::State {
     // keep port, shared snapshot, server, worker in one owned state
     explicit State(std::uint16_t selected_port) : port(selected_port) {}
