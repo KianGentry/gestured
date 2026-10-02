@@ -8,6 +8,9 @@
 #include "vision/onnx_tracker.hpp"
 #include "web/web_server.hpp"
 #include <sstream>
+#include <algorithm>
+#include <array>
+#include <cmath>
 
 namespace 
 {
@@ -21,6 +24,32 @@ void handle_signal(int) {
 }
 
 } // namespace
+
+using Polygon = std::array<std::array<float, 2>, 4>;
+
+Polygon palm_polygon(const PalmDetection& palm, uint32_t width, uint32_t height, float angle) {
+    const float half = palm.size * std::max(width,height) * 0.5f;
+    const float cx = palm.center_x * width;
+    const float cy = palm.center_y * height;
+    const float c = std::cos(angle);
+    const float s = std::sin(angle);
+
+    const std::array<std::array<float, 2>, 4> corners = {{
+        {-1.0f, -1.0f}, {1.0f, -1.0f},
+        {1.0f, 1.0f}, {-1.0f, 1.0f}
+    }}; 
+
+    Polygon result;
+    for (std::size_t i = 0; i < corners.size(); ++i) {
+        const float x = corners[i][0] * half;
+        const float y = corners[i][1] * half;
+        result[i] = {(cx + c * x - s * y) / width,
+        (s * x + c * y + cy) / height};
+    }
+
+    return result;
+}
+
 
 int main() {
 
@@ -158,7 +187,30 @@ int main() {
 
         std::ostringstream tracking;
 
-        tracking << "{\"palms\":[],\"hands\":[";
+        // palm tracking
+        tracking << "{\"palms\":[";
+        for (std::size_t i = 0; i < palms.size(); ++i) {
+            if (i) tracking << ",";
+            const auto box = palm_polygon(palms[i], width, height, 0.0f);
+            const auto rotated = palm_polygon(palms[i], width, height, palms[i].rotation);
+
+            const auto write_polygon = [&tracking](const Polygon& points) {
+                tracking << "[";
+                for (std::size_t j = 0; j < points.size(); ++j) {
+                    if (j) tracking << ",";
+                    tracking << "[" << points[j][0] << "," << points[j][1] << "]";
+                }
+                tracking << "]";
+            };
+            tracking << "{\"box\":";
+            write_polygon(box);
+            tracking << ",\"rotated_box\":";
+            write_polygon(rotated);
+            tracking << "}";
+        }
+
+        // finger / landmark tracking
+        tracking << "],\"hands\":[";
         for (std::size_t i = 0; i < hands.size(); ++i) {
             if (i) tracking << ",";
             tracking << "{\"landmarks\":[";
