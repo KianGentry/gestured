@@ -168,7 +168,7 @@ int main() {
         snapshot.tracking_json = tracking.str();
 
         web_server.publish(std::move(snapshot));
-
+/*
         ++frame_count;
         ++reported_frames;
 
@@ -187,6 +187,8 @@ int main() {
             landmark_frames = 0;
             report_time = now;
         }
+    */
     }
+
     return 0;
 }
