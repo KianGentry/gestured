@@ -39,6 +39,8 @@ public:
     bool start_streaming();
     void stop_streaming();
 
+    bool set_manual_exposure(int exposure_100us);
+
 private:
     bool streaming_ = false;
     bool prepare_buffers();

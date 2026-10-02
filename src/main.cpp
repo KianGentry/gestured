@@ -101,6 +101,12 @@ int main() {
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
 
+    // set exposure manually (reduce motion blur if youd like)
+    if (!camera.set_manual_exposure(400)) {
+        std::cerr << "Failed to set manual exposure" << std::endl;
+        return 1;
+    }
+
     // queue camera buffers, start continuous capture
     if (!camera.start_streaming()) {
         std::cerr << "Failed to start camera stream" << std::endl;
@@ -145,8 +151,6 @@ int main() {
         if (!hands.empty()) {
             ++landmark_frames;
         }
-
-
 
         // publish compressed camera frame, tracking payload currently empty
         WebSnapshot snapshot;

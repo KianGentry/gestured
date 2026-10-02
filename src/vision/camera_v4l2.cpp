@@ -343,3 +343,14 @@ void Camera::stop_streaming() {
     ioctl(fd_, VIDIOC_STREAMOFF, &type);
     streaming_ = false;
 }
+
+bool Camera::set_manual_exposure(int exposure_100us) {
+    const auto set_control = [this](std::uint32_t id, int value) {
+        v4l2_control control{};
+        control.id = id;
+        control.value = value;
+        return ioctl(fd_, VIDIOC_S_CTRL, &control) == 0;
+    };
+
+    return set_control(V4L2_CID_EXPOSURE_AUTO, V4L2_EXPOSURE_MANUAL) && set_control(V4L2_CID_EXPOSURE_ABSOLUTE, exposure_100us);
+}
