@@ -283,7 +283,8 @@ std::vector<PalmDetection> OnnxTracker::detect_palms(
             // prediction fields, score, box centre, size, two keypoints
             const float* box = values + i * 8;
             // discard weak predictions, invalid box sizes
-            if (box[0] <= 0.6f || box[3] <= 0.0f) continue;
+            // 0.4f is confidence value for palm detection
+            if (box[0] <= 0.4f || box[3] <= 0.0f) continue;
             // two keypoints define hand orientation, image axes
             const float angle = 0.5f * static_cast<float>(M_PI) -
                 std::atan2(-(box[7] - box[5]), box[6] - box[4]);
@@ -339,7 +340,8 @@ const std::vector<PalmDetection>& palms) {
         // model outputs, 21 xyz points, confidence score, right hand score per crop
         for (std::size_t i = 0; i < palms.size(); ++i) {
             // confidence filter, keep low quality crops from caller
-            if (scores[i] <= 0.5f) continue;
+            // 0.4f is confidence value for landmark detection
+            if (scores[i] <= 0.4f) continue;
             HandLandmarkResult result{};
             // one hand, 21 points, three coordinates each
             std::copy_n(xyz + i * 63, 63, result.xyz.begin());
