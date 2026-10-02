@@ -25,13 +25,15 @@ struct WebServer::State {
         while (sink.is_writable()) {
             std::vector<std::uint8_t> jpeg;
 
-            std::unique_lock lock(mutex);
-            updated.wait(lock, [&] {
-                return sequence != last_sequence || stopping;
-            });
-            if (stopping) return;
-            jpeg = latest.jpeg;
-            last_sequence = sequence;
+            {
+                std::unique_lock lock(mutex);
+                updated.wait(lock, [&] {
+                    return sequence != last_sequence || stopping;
+                });
+                if (stopping) return;
+                jpeg = latest.jpeg;
+                last_sequence = sequence;
+            }
 
             const std::string header = "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " 
                 + std::to_string(jpeg.size()) + "\r\n\r\n";
@@ -96,11 +98,12 @@ bool WebServer::start() {
 }
 
 void WebServer::stop() {
-    std::lock_guard lock(state_->mutex);
-    state_->stopping = true;
-    state_->updated.notify_all();
+    {
+        std::lock_guard lock(state_->mutex);
+        state_->stopping = true;
+        state_->updated.notify_all();
+    }
     // ask the request loop to exit, then wait for its thread to finish
     state_->server.stop();
-    
     if (state_->worker.joinable()) state_->worker.join();
 }

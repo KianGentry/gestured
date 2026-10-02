@@ -283,8 +283,8 @@ std::vector<PalmDetection> OnnxTracker::detect_palms(
             // prediction fields, score, box centre, size, two keypoints
             const float* box = values + i * 8;
             // discard weak predictions, invalid box sizes
-            // 0.4f is confidence value for palm detection
-            if (box[0] <= 0.4f || box[3] <= 0.0f) continue;
+            // 0.5f is confidence value for palm detection
+            if (box[0] <= 0.5f || box[3] <= 0.0f) continue;
             // two keypoints define hand orientation, image axes
             const float angle = 0.5f * static_cast<float>(M_PI) -
                 std::atan2(-(box[7] - box[5]), box[6] - box[4]);
