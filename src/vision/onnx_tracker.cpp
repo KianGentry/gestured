@@ -340,8 +340,8 @@ const std::vector<PalmDetection>& palms) {
         // model outputs, 21 xyz points, confidence score, right hand score per crop
         for (std::size_t i = 0; i < palms.size(); ++i) {
             // confidence filter, keep low quality crops from caller
-            // 0.4f is confidence value for landmark detection
-            if (scores[i] <= 0.4f) continue;
+            // 0.5f is confidence value for landmark detection
+            if (scores[i] <= 0.5f) continue;
             HandLandmarkResult result{};
             // one hand, 21 points, three coordinates each
             std::copy_n(xyz + i * 63, 63, result.xyz.begin());
