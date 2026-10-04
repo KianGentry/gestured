@@ -1,6 +1,33 @@
 const image = document.querySelector('#frame');
 const canvas = document.querySelector('#overlay');
 const context = canvas.getContext('2d');
+const confidenceInputs = {
+    palm: document.querySelector('#palm-confidence'),
+    landmark: document.querySelector('#landmark-confidence')
+};
+let confidenceTimer;
+
+// load current thresholds, display changes, send slider updates
+async function loadConfidence() {
+    const response = await fetch('/confidence');
+    const values = await response.json();
+    for (const [name, input] of Object.entries(confidenceInputs)) {
+        input.value = values[name];
+        document.querySelector(`#${name}-value`).value = Number(values[name]).toFixed(2);
+        input.addEventListener('input', () => {
+            document.querySelector(`#${name}-value`).value = Number(input.value).toFixed(2);
+            // debounce requests, avoid posting every slider event
+            clearTimeout(confidenceTimer);
+            confidenceTimer = setTimeout(() => {
+                const query = new URLSearchParams({
+                    palm: confidenceInputs.palm.value,
+                    landmark: confidenceInputs.landmark.value
+                });
+                fetch(`/confidence?${query}`, { method: 'POST' });
+            }, 100);
+        });
+    }
+}
 
 // landmark index pairs, finger bones and palm links
 const connections = [
@@ -106,8 +133,9 @@ image.addEventListener("load", () => {
     canvas.height = image.naturalHeight;
     draw();
 });
+// start camera stream, refresh tracking and confidence controls
 image.src = "/stream.mjpg";
-// start refresh loops
 
 //updateFrame();
 updateTracking();
+loadConfidence();

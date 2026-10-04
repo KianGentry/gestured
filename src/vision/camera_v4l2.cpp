@@ -356,6 +356,7 @@ bool Camera::set_manual_exposure(int exposure_100us) {
 }
 
 bool Camera::set_gain(int gain) {
+    // send the requested gain to v4l2, units depend on the camera driver
     v4l2_control control{};
     control.id = V4L2_CID_GAIN;
     control.value = gain;

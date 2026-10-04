@@ -27,13 +27,16 @@ void handle_signal(int) {
 
 using Polygon = std::array<std::array<float, 2>, 4>;
 
+// build a frame relative square, rotate its corners around the palm centre
 Polygon palm_polygon(const PalmDetection& palm, uint32_t width, uint32_t height, float angle) {
+    // scale the detected size against the longer frame dimension
     const float half = palm.size * std::max(width,height) * 0.5f;
     const float cx = palm.center_x * width;
     const float cy = palm.center_y * height;
     const float c = std::cos(angle);
     const float s = std::sin(angle);
 
+    // unit square corners, scaled and rotated below
     const std::array<std::array<float, 2>, 4> corners = {{
         {-1.0f, -1.0f}, {1.0f, -1.0f},
         {1.0f, 1.0f}, {-1.0f, 1.0f}
@@ -43,6 +46,7 @@ Polygon palm_polygon(const PalmDetection& palm, uint32_t width, uint32_t height,
     for (std::size_t i = 0; i < corners.size(); ++i) {
         const float x = corners[i][0] * half;
         const float y = corners[i][1] * half;
+        // rotate around the palm centre, normalise for the frame
         result[i] = {(cx + c * x - s * y) / width,
         (s * x + c * y + cy) / height};
     }
@@ -74,10 +78,13 @@ int main() {
     std::cout << "Using " << settings.width << "x" 
     << settings.height << " at " << settings.fps << "fps" << std::endl;
 
+    // keep shared thresholds alive, tracker and web server hold references
+    TrackerConfidence confidence;
     // load the palm detector, load the landmark model
     OnnxTracker tracker(
         "models/palm_detection_full_inf_post_192x192.onnx",
-        "models/hand_landmark_sparse_Nx3x224x224.onnx");
+        "models/hand_landmark_sparse_Nx3x224x224.onnx",
+        confidence);
 
     if (!tracker.initialise()) {
         std::cerr << "Failed to initialise tracker" << std::endl;
@@ -130,14 +137,14 @@ int main() {
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
 
-    // set exposure manually (reduce motion blur if youd like)
-    if (!camera.set_manual_exposure(500)) {
+    // set manual exposure, reduce motion blur
+    if (!camera.set_manual_exposure(200)) {
         std::cerr << "Failed to set manual exposure" << std::endl;
         return 1;
     }
 
-    // set gain manually (make it brighter)
-    if (!camera.set_gain(48)) {
+    // set manual gain, brighten the image
+    if (!camera.set_gain(63)) {
         std::cerr << "Failed to set gain" << std::endl;
         return 1;
     }
@@ -149,7 +156,7 @@ int main() {
     }
 
     // serve the web ui, expose frame and tracking routes
-    WebServer web_server(2026);
+    WebServer web_server(confidence, 2026);
     if (!web_server.start()) {
         std::cerr << "Failed to start web server on http://127.0.0.1:2026" << std::endl;
         return 1;
@@ -187,13 +194,13 @@ int main() {
             ++landmark_frames;
         }
 
-        // publish compressed camera frame, tracking payload currently empty
+        // publish camera frame, add frame relative palm boxes and hand landmarks
         WebSnapshot snapshot;
         snapshot.jpeg = frame;
 
         std::ostringstream tracking;
 
-        // palm tracking
+        // serialise axis aligned and rotated palm outlines
         tracking << "{\"palms\":[";
         for (std::size_t i = 0; i < palms.size(); ++i) {
             if (i) tracking << ",";
@@ -215,7 +222,7 @@ int main() {
             tracking << "}";
         }
 
-        // finger / landmark tracking
+        // serialise frame relative hand landmark coordinates
         tracking << "],\"hands\":[";
         for (std::size_t i = 0; i < hands.size(); ++i) {
             if (i) tracking << ",";

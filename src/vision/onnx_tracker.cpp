@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cmath>
 #include <vector>
+#include "vision/tracker_confidence.hpp"
 
 namespace
 {
@@ -207,8 +208,10 @@ struct OnnxTracker::State {
 OnnxTracker::~OnnxTracker() = default;
 
 // model paths, onnx session creation during initialise
-OnnxTracker::OnnxTracker(std::string palm_model_path, std::string landmark_model_path) 
-: palm_model_path_(std::move(palm_model_path)), landmark_model_path_(std::move(landmark_model_path)), state_(std::make_unique<State>()) {}
+OnnxTracker::OnnxTracker(std::string palm_model_path, std::string landmark_model_path, TrackerConfidence& confidence)
+        : confidence_(confidence), palm_model_path_(std::move(palm_model_path)),
+            landmark_model_path_(std::move(landmark_model_path)),
+            state_(std::make_unique<State>()) {}
 
 bool OnnxTracker::initialise() {
     try {
@@ -283,8 +286,8 @@ std::vector<PalmDetection> OnnxTracker::detect_palms(
             // prediction fields, score, box centre, size, two keypoints
             const float* box = values + i * 8;
             // discard weak predictions, invalid box sizes
-            // 0.5f is confidence value for palm detection
-            if (box[0] <= 0.5f || box[3] <= 0.0f) continue;
+            // read live palm threshold, web slider changes apply to later detections
+            if (box[0] <= confidence_.palm.load() || box[3] <= 0.0f) continue;
             // two keypoints define hand orientation, image axes
             const float angle = 0.5f * static_cast<float>(M_PI) -
                 std::atan2(-(box[7] - box[5]), box[6] - box[4]);
@@ -340,8 +343,8 @@ const std::vector<PalmDetection>& palms) {
         // model outputs, 21 xyz points, confidence score, right hand score per crop
         for (std::size_t i = 0; i < palms.size(); ++i) {
             // confidence filter, keep low quality crops from caller
-            // 0.5f is confidence value for landmark detection
-            if (scores[i] <= 0.5f) continue;
+            // read live landmark threshold, web slider changes apply to later results
+            if (scores[i] <= confidence_.landmark.load()) continue;
             HandLandmarkResult result{};
             // one hand, 21 points, three coordinates each
             std::copy_n(xyz + i * 63, 63, result.xyz.begin());

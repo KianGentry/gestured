@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <condition_variable>
+#include "vision/tracker_confidence.hpp"
 
 struct WebSnapshot {
     std::vector<uint8_t> jpeg;
@@ -11,7 +12,7 @@ struct WebSnapshot {
 
 class WebServer {
 public:
-    explicit WebServer(std::uint16_t port = 2026);
+    explicit WebServer(TrackerConfidence& confidence, std::uint16_t port = 2026);
     ~WebServer();
 
     WebServer(const WebServer&) = delete;

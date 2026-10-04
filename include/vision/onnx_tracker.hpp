@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "vision/tracker_confidence.hpp"
 
 struct PalmDetection {
     float size;
@@ -20,7 +21,7 @@ struct HandLandmarkResult {
 
 class OnnxTracker {
 public:
-    OnnxTracker(std::string palm_model_path, std::string landmark_model_path);
+    OnnxTracker(std::string palm_model_path, std::string landmark_model_path, TrackerConfidence& confidence);
     ~OnnxTracker();
 
     bool initialise();
@@ -33,6 +34,7 @@ public:
         const std::vector<PalmDetection>& palms);
 
 private:
+    TrackerConfidence& confidence_;
     std::string palm_model_path_;
     std::string landmark_model_path_;
     std::string input_description_;

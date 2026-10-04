@@ -8,6 +8,12 @@
 </head>
 
 <body style="margin:0; background:#000000; min-height:100vh; display:grid; place-items:center; overflow:hidden;">
+    <!-- live confidence controls, separate thresholds for each model stage -->
+    <div style="position:fixed; top:12px; left:12px; z-index:1; color:white; background:#222; padding:8px;">
+        <label>palm confidence <input id="palm-confidence" type="range" min="0" max="1" step="0.01"><output id="palm-value"></output></label>
+        <br>
+        <label>landmark confidence <input id="landmark-confidence" type="range" min="0" max="1" step="0.01"><output id="landmark-value"></output></label>
+    </div>
     <div style="position:relative; max-width:100vw; max-height:100vh;">
         <img id="frame" style="display:block; max-width:100vw; max-height:100vh;">
         <canvas id="overlay" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;"></canvas>
