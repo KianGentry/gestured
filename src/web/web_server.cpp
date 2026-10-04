@@ -74,8 +74,7 @@ struct WebServer::State {
         // return current thresholds, read atomically alongside inference
         server.Get("/confidence", [this](const httplib::Request&, httplib::Response& response) {
             std::ostringstream json;
-              json << "{\"palm\":" << confidence.palm.load()
-                  << ",\"landmark\":" << confidence.landmark.load() << "}";
+            json << "{\"palm\":" << confidence.palm.load() << ",\"landmark\":" << confidence.landmark.load() << "}";
             response.set_content(json.str(), "application/json");
         });
 
@@ -115,6 +114,20 @@ void WebServer::publish(WebSnapshot snapshot) {
     ++state_->sequence;
     // wake streaming clients, a new frame is ready
     state_->updated.notify_all();
+}
+
+void WebServer::publish_frame(std::vector<std::uint8_t> jpeg) {
+    {
+        std::lock_guard lock(state_->mutex);
+        state_->latest.jpeg = std::move(jpeg);
+        ++state_->sequence;
+    }
+    state_->updated.notify_all();
+}
+
+void WebServer::publish_tracking(std::string tracking_json) {
+    std::lock_guard lock(state_->mutex);
+    state_->latest.tracking_json = std::move(tracking_json);
 }
 
 bool WebServer::start() {

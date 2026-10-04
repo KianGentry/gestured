@@ -19,6 +19,8 @@ public:
     WebServer& operator=(const WebServer&) = delete;
 
     void publish(WebSnapshot snapshot);
+    void publish_frame(std::vector<uint8_t> jpeg);
+    void publish_tracking(std::string tracking_json);
     bool start();
     void stop();
 

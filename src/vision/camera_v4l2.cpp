@@ -22,8 +22,8 @@ struct Target {
 };
 
 constexpr Target targets[] = {
-    {1920, 1080, 30, 24, 30},
-    {1280, 720, 24, 24, 30}
+    {1280, 720, 24, 24, 30},
+    {1920, 1080, 30, 24, 30}
 };
 
 bool set_format(int fd, const Target& target, CameraSettings& settings) {

@@ -1,7 +1,11 @@
 #include <chrono>
 #include <csignal>
+#include <atomic>
+#include <condition_variable>
 #include <iostream>
+#include <mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 #include "vision/camera_v4l2.hpp"
 #include "vision/mjpeg_decoder.hpp"
@@ -16,11 +20,11 @@ namespace
 {
 
 // shared stop flag, safe to update from a signal handler
-volatile std::sig_atomic_t running = 1;
+std::atomic<bool> running{true};
 
 // request an orderly exit from the capture loop
 void handle_signal(int) {
-    running = 0;
+    running.store(false);
 }
 
 } // namespace
@@ -99,41 +103,7 @@ int main() {
     }
 
     std::cout << "onnx inference test passed" << std::endl;
-/*
-    // capture one frame, useful for a quick camera check
-    std::vector<uint8_t> frame;
-    if (!camera.capture_frame(frame)) {
-        std::cerr << "Failed to capture frame" << std::endl;
-        return 1;
-    }
 
-    std::cout << "Captured frame, size " << frame.size() << "B" << std::endl;
-
-    // decode compressed camera data into rgb pixels
-    std::vector<uint8_t> rgb;
-    uint32_t width = 0;
-    uint32_t height = 0;
-    if (!decode_mjpeg(frame, rgb, width, height)) {
-        std::cerr << "Failed to decode MJPEG frame" << std::endl;
-        return 1;
-    }
-
-    std::cout << "Decoded frame" << width << "x" << height << ", size " << rgb.size() << "B" << std::endl;
-
-    for (const auto& device : cameras) {
-        std::cout << device.path << ": " << device.name << std::endl;
-
-        for (const auto& format : discover_camera_formats(device)) {
-            std::cout << "  " << format.pixel_format << std::endl;
-
-            for (const auto& size : format.frame_sizes) {
-                std::cout << "    " << size << std::endl;
-            }
-            
-            std::cout << std::endl;
-        }
-    }
-*/
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
 
@@ -163,40 +133,90 @@ int main() {
     }
     std::cout << "Web server started on http://127.0.0.1:2026" << std::endl;
 
-    std::vector<uint8_t> frame;
     std::vector<uint8_t> rgb;
-    std::uint64_t frame_count = 0;
-    std::uint64_t reported_frames = 0;
-    std::uint64_t detected_frames = 0;
-    std::uint64_t landmark_frames = 0;
-    // use a steady clock, elapsed time must not jump with wall clock changes
-    auto report_time = std::chrono::steady_clock::now();
+    std::mutex frame_mutex;
+    std::condition_variable frame_ready;
+    std::vector<uint8_t> latest_frame;
+    std::uint64_t latest_sequence = 0;
+    bool capture_done = false;
 
-    // capture and process frames until a signal requests shutdown
-    while(running) {
+    std::thread capture_thread([&] {
+        std::vector<uint8_t> captured_frame;
+        while (running.load()) {
+            if (!camera.capture_frame(captured_frame)) {
+                if (running.load()) std::cerr << "Camera capture failed" << std::endl;
+                break;
+            }
+            {
+                std::lock_guard lock(frame_mutex);
+                latest_frame = captured_frame;
+                ++latest_sequence;
+            }
+            web_server.publish_frame(std::move(captured_frame));
+            frame_ready.notify_one();
+        }
+        {
+            std::lock_guard lock(frame_mutex);
+            capture_done = true;
+        }
+        frame_ready.notify_all();
+    });
+
+    using Clock = std::chrono::steady_clock;
+    constexpr auto palm_interval = std::chrono::milliseconds(75); // 16 hz
+    constexpr auto landmark_interval = std::chrono::milliseconds(50); // 20 hz
+    auto last_palm_run = Clock::now() - palm_interval;
+    auto last_landmark_run = Clock::now() - landmark_interval;
+    auto report_time = Clock::now();
+    std::uint64_t palm_runs = 0;
+    std::uint64_t landmark_runs = 0;
+    std::vector<PalmDetection> palms;
+    std::vector<HandLandmarkResult> hands;
+
+    // infer at bounded rates on the newest captured frame, skipping stale frames
+    std::uint64_t processed_sequence = 0;
+    while(running.load()) {
+        std::vector<uint8_t> frame;
+        {
+            std::unique_lock lock(frame_mutex);
+            frame_ready.wait(lock, [&] {
+                return latest_sequence != processed_sequence || capture_done || !running.load();
+            });
+            if (!running.load() ||
+                (capture_done && latest_sequence == processed_sequence)) break;
+            frame = latest_frame;
+            processed_sequence = latest_sequence;
+        }
+
+        const auto now = Clock::now();
+        const bool run_palm = now - last_palm_run >= palm_interval;
+        const bool run_landmark = now - last_landmark_run >= landmark_interval;
+        if (!run_palm && !run_landmark) continue;
+
         uint32_t width = 0;
         uint32_t height = 0;
 
-        // stop on capture or decode failure, report only during normal operation
-        if (!camera.capture_frame(frame) || !decode_mjpeg(frame, rgb, width, height)) {
-            if (running) {
-                std::cerr << "Failed to process frame" << std::endl;
+        if (!decode_mjpeg(frame, rgb, width, height)) {
+            std::cerr << "Failed to decode camera frame" << std::endl;
+            continue;
+        }
+
+        if (run_palm) {
+            palms = tracker.detect_palms(rgb, width, height);
+            last_palm_run = now;
+            ++palm_runs;
+            if (palms.empty()) hands.clear();
+        }
+
+        if (run_landmark) {
+            if (palms.empty()) {
+                hands.clear();
+            } else {
+                hands = tracker.detect_landmarks(rgb, width, height, palms);
+                ++landmark_runs;
             }
-            break;
+            last_landmark_run = now;
         }
-
-        const auto palms = tracker.detect_palms(rgb, width, height);
-        const auto hands = tracker.detect_landmarks(rgb, width, height, palms);
-        if (!palms.empty()) {
-            ++detected_frames;
-        }
-        if (!hands.empty()) {
-            ++landmark_frames;
-        }
-
-        // publish camera frame, add frame relative palm boxes and hand landmarks
-        WebSnapshot snapshot;
-        snapshot.jpeg = frame;
 
         std::ostringstream tracking;
 
@@ -234,30 +254,21 @@ int main() {
             tracking << "]}";
         }
         tracking << "]}";
-        snapshot.tracking_json = tracking.str();
-
-        web_server.publish(std::move(snapshot));
+        web_server.publish_tracking(tracking.str());
 /*
-        ++frame_count;
-        ++reported_frames;
-
-        // report throughput and detection counts once each second
-        const auto now = std::chrono::steady_clock::now();
-        const auto elapsed = now - report_time;
-
-        if (elapsed >= std::chrono::seconds(1)) {
-            const double seconds = std::chrono::duration<double>(elapsed).count();
-            std::cout << "Processed " << frame_count << " frames, " 
-            << reported_frames / seconds << " fps, palms in "<< detected_frames << " frames, landmarks in " 
-            << landmark_frames << " frames" << std::endl;
-
-            reported_frames = 0;
-            detected_frames = 0;
-            landmark_frames = 0;
+        if (now - report_time >= std::chrono::seconds(1)) {
+            const double seconds = std::chrono::duration<double>(now - report_time).count();
+            std::cout << "Inference rates: palms " << palm_runs / seconds << " Hz, landmarks " << landmark_runs / seconds << " Hz" << std::endl;
+            palm_runs = 0;
+            landmark_runs = 0;
             report_time = now;
         }
-    */
+*/
     }
+
+    running.store(false);
+    frame_ready.notify_all();
+    capture_thread.join();
 
     return 0;
 }
