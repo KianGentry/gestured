@@ -40,6 +40,7 @@ public:
     void stop_streaming();
 
     bool set_manual_exposure(int exposure_100us);
+    bool set_gain(int gain);
 
 private:
     bool streaming_ = false;

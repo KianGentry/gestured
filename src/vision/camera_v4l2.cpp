@@ -354,3 +354,10 @@ bool Camera::set_manual_exposure(int exposure_100us) {
 
     return set_control(V4L2_CID_EXPOSURE_AUTO, V4L2_EXPOSURE_MANUAL) && set_control(V4L2_CID_EXPOSURE_ABSOLUTE, exposure_100us);
 }
+
+bool Camera::set_gain(int gain) {
+    v4l2_control control{};
+    control.id = V4L2_CID_GAIN;
+    control.value = gain;
+    return ioctl(fd_, VIDIOC_S_CTRL, &control) == 0;
+}

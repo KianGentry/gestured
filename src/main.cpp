@@ -131,8 +131,14 @@ int main() {
     std::signal(SIGTERM, handle_signal);
 
     // set exposure manually (reduce motion blur if youd like)
-    if (!camera.set_manual_exposure(400)) {
+    if (!camera.set_manual_exposure(500)) {
         std::cerr << "Failed to set manual exposure" << std::endl;
+        return 1;
+    }
+
+    // set gain manually (make it brighter)
+    if (!camera.set_gain(48)) {
+        std::cerr << "Failed to set gain" << std::endl;
         return 1;
     }
 
