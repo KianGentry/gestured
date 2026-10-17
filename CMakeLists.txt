@@ -20,6 +20,26 @@ target_include_directories(gestured PRIVATE
 find_package(JPEG REQUIRED)
 find_package(onnxruntime CONFIG REQUIRED)
 
+function(gestured_map_missing_imported_config target config)
+    get_target_property(imported_configs ${target} IMPORTED_CONFIGURATIONS)
+    if(imported_configs)
+        string(TOUPPER "${config}" config_upper)
+        list(FIND imported_configs "${config_upper}" config_index)
+        get_target_property(generic_location ${target} IMPORTED_LOCATION)
+        if(config_index EQUAL -1 AND NOT generic_location)
+            list(GET imported_configs 0 fallback_config)
+            set_property(TARGET ${target} PROPERTY
+                MAP_IMPORTED_CONFIG_${config_upper} "${fallback_config}"
+            )
+        endif()
+    endif()
+endfunction()
+
+# Some distro packages only export optimized library configurations.
+gestured_map_missing_imported_config(JPEG::JPEG DEBUG)
+gestured_map_missing_imported_config(onnxruntime::onnxruntime DEBUG)
+gestured_map_missing_imported_config(onnxruntime::onnxruntime RELEASE)
+
 target_link_libraries(gestured PRIVATE JPEG::JPEG onnxruntime::onnxruntime)
 
 target_compile_definitions(gestured PRIVATE GESTURED_WEBUI_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src/webui")

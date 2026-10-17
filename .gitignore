@@ -1,2 +1,5 @@
 build/
 build-release/
+.idea/
+cmake-build-debug/
+cmake-build-default-event-trace/
