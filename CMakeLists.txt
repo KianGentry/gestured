@@ -17,6 +17,33 @@ add_executable(gestured
     src/web/web_server.cpp
 )
 
+enable_testing()
+
+add_executable(frame_mailbox_test
+    tests/frame_mailbox_test.cpp
+    src/vision/frame_mailbox.cpp
+)
+
+target_include_directories(frame_mailbox_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_compile_features(frame_mailbox_test PRIVATE cxx_std_20)
+
+add_executable(recognition_scheduler_test
+    tests/recognition_scheduler_test.cpp
+    src/vision/recognition_scheduler.cpp
+)
+
+target_include_directories(recognition_scheduler_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_compile_features(recognition_scheduler_test PRIVATE cxx_std_20)
+
+add_test(NAME frame_mailbox_test COMMAND frame_mailbox_test)
+add_test(NAME recognition_scheduler_test COMMAND recognition_scheduler_test)
+
 target_include_directories(gestured PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )

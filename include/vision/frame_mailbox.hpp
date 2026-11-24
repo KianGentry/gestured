@@ -8,9 +8,7 @@
 class FrameMailbox {
 public:
     void publish_frame(std::vector<std::uint8_t> frame);
-    bool wait_for_new_frame(
-        std::vector<std::uint8_t>& frame,
-        std::uint64_t& processed_sequence);
+    bool wait_for_new_frame(std::vector<std::uint8_t>& frame, std::uint64_t& processed_sequence);
     void mark_capture_done();
     void stop();
 

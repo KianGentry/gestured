@@ -4,11 +4,7 @@
 #include <utility>
 #include <vector>
 
-void capture_frames(
-    Camera& camera,
-    WebServer& web_server,
-    FrameMailbox& frame_mailbox,
-    std::atomic<bool>& running) {
+void capture_frames(Camera& camera, WebServer& web_server, FrameMailbox& frame_mailbox, std::atomic<bool>& running) {
     std::vector<std::uint8_t> captured_frame;
 
     while (running.load()) {

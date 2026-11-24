@@ -9,12 +9,9 @@ struct RecognitionSchedule {
 
 class RecognitionScheduler {
 public:
-    RecognitionScheduler(
-        std::chrono::milliseconds palm_interval,
-        std::chrono::milliseconds landmark_interval);
+    RecognitionScheduler(std::chrono::milliseconds palm_interval, std::chrono::milliseconds landmark_interval);
 
-    RecognitionSchedule schedule(
-        std::chrono::steady_clock::time_point now);
+    RecognitionSchedule schedule(std::chrono::steady_clock::time_point now);
 
 private:
     std::chrono::milliseconds palm_interval_;
