@@ -7,9 +7,13 @@ project(gestured
 
 add_executable(gestured
     src/main.cpp
+    src/vision/capture_loop.cpp
     src/vision/camera_v4l2.cpp
     src/vision/mjpeg_decoder.cpp
     src/vision/onnx_tracker.cpp
+    src/vision/frame_mailbox.cpp
+    src/vision/recognition_scheduler.cpp
+    src/vision/tracking_json.cpp
     src/web/web_server.cpp
 )
 

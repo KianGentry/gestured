@@ -1,20 +1,18 @@
 #include <chrono>
 #include <csignal>
 #include <atomic>
-#include <condition_variable>
+#include <functional>
 #include <iostream>
-#include <mutex>
 #include <thread>
-#include <utility>
 #include <vector>
+#include "vision/capture_loop.hpp"
 #include "vision/camera_v4l2.hpp"
+#include "vision/frame_mailbox.hpp"
 #include "vision/mjpeg_decoder.hpp"
 #include "vision/onnx_tracker.hpp"
+#include "vision/recognition_scheduler.hpp"
+#include "vision/tracking_json.hpp"
 #include "web/web_server.hpp"
-#include <sstream>
-#include <algorithm>
-#include <array>
-#include <cmath>
 
 namespace 
 {
@@ -28,36 +26,6 @@ void handle_signal(int) {
 }
 
 } // namespace
-
-using Polygon = std::array<std::array<float, 2>, 4>;
-
-// build a frame relative square, rotate its corners around the palm centre
-Polygon palm_polygon(const PalmDetection& palm, uint32_t width, uint32_t height, float angle) {
-    // scale the detected size against the longer frame dimension
-    const float half = palm.size * std::max(width,height) * 0.5f;
-    const float cx = palm.center_x * width;
-    const float cy = palm.center_y * height;
-    const float c = std::cos(angle);
-    const float s = std::sin(angle);
-
-    // unit square corners, scaled and rotated below
-    const std::array<std::array<float, 2>, 4> corners = {{
-        {-1.0f, -1.0f}, {1.0f, -1.0f},
-        {1.0f, 1.0f}, {-1.0f, 1.0f}
-    }}; 
-
-    Polygon result;
-    for (std::size_t i = 0; i < corners.size(); ++i) {
-        const float x = corners[i][0] * half;
-        const float y = corners[i][1] * half;
-        // rotate around the palm centre, normalise for the frame
-        result[i] = {(cx + c * x - s * y) / width,
-        (s * x + c * y + cy) / height};
-    }
-
-    return result;
-}
-
 
 int main() {
 
@@ -134,42 +102,17 @@ int main() {
     std::cout << "Web server started on http://127.0.0.1:2026" << std::endl;
 
     std::vector<uint8_t> rgb;
-    std::mutex frame_mutex;
-    std::condition_variable frame_ready;
-    std::vector<uint8_t> latest_frame;
-    std::uint64_t latest_sequence = 0;
-    bool capture_done = false;
+    FrameMailbox frame_mailbox;
+    std::thread capture_thread(
+        capture_frames,
+        std::ref(camera),
+        std::ref(web_server),
+        std::ref(frame_mailbox),
+        std::ref(running));
 
-    std::thread capture_thread([&] {
-        std::vector<uint8_t> captured_frame;
-        while (running.load()) {
-            if (!camera.capture_frame(captured_frame)) {
-                if (running.load()) std::cerr << "Camera capture failed" << std::endl;
-                break;
-            }
-            {
-                std::lock_guard lock(frame_mutex);
-                latest_frame = captured_frame;
-                ++latest_sequence;
-            }
-            web_server.publish_frame(std::move(captured_frame));
-            frame_ready.notify_one();
-        }
-        {
-            std::lock_guard lock(frame_mutex);
-            capture_done = true;
-        }
-        frame_ready.notify_all();
-    });
-
-    using Clock = std::chrono::steady_clock;
-    constexpr auto palm_interval = std::chrono::milliseconds(75); // 16 hz
-    constexpr auto landmark_interval = std::chrono::milliseconds(50); // 20 hz
-    auto last_palm_run = Clock::now() - palm_interval;
-    auto last_landmark_run = Clock::now() - landmark_interval;
-    auto report_time = Clock::now();
-    std::uint64_t palm_runs = 0;
-    std::uint64_t landmark_runs = 0;
+    constexpr auto palm_interval = std::chrono::milliseconds(75); // 13 Hz
+    constexpr auto landmark_interval = std::chrono::milliseconds(50); // 20 Hz
+    RecognitionScheduler scheduler(palm_interval, landmark_interval);
     std::vector<PalmDetection> palms;
     std::vector<HandLandmarkResult> hands;
 
@@ -177,21 +120,11 @@ int main() {
     std::uint64_t processed_sequence = 0;
     while(running.load()) {
         std::vector<uint8_t> frame;
-        {
-            std::unique_lock lock(frame_mutex);
-            frame_ready.wait(lock, [&] {
-                return latest_sequence != processed_sequence || capture_done || !running.load();
-            });
-            if (!running.load() ||
-                (capture_done && latest_sequence == processed_sequence)) break;
-            frame = latest_frame;
-            processed_sequence = latest_sequence;
-        }
+        if (!frame_mailbox.wait_for_new_frame(frame, processed_sequence)) break;
 
-        const auto now = Clock::now();
-        const bool run_palm = now - last_palm_run >= palm_interval;
-        const bool run_landmark = now - last_landmark_run >= landmark_interval;
-        if (!run_palm && !run_landmark) continue;
+        const auto schedule =
+            scheduler.schedule(std::chrono::steady_clock::now());
+        if (!schedule.run_palms && !schedule.run_landmarks) continue;
 
         uint32_t width = 0;
         uint32_t height = 0;
@@ -201,73 +134,25 @@ int main() {
             continue;
         }
 
-        if (run_palm) {
+        if (schedule.run_palms) {
             palms = tracker.detect_palms(rgb, width, height);
-            last_palm_run = now;
-            ++palm_runs;
             if (palms.empty()) hands.clear();
         }
 
-        if (run_landmark) {
+        if (schedule.run_landmarks) {
             if (palms.empty()) {
                 hands.clear();
             } else {
                 hands = tracker.detect_landmarks(rgb, width, height, palms);
-                ++landmark_runs;
             }
-            last_landmark_run = now;
         }
 
-        std::ostringstream tracking;
-
-        // serialise axis aligned and rotated palm outlines
-        tracking << "{\"palms\":[";
-        for (std::size_t i = 0; i < palms.size(); ++i) {
-            if (i) tracking << ",";
-            const auto box = palm_polygon(palms[i], width, height, 0.0f);
-            const auto rotated = palm_polygon(palms[i], width, height, palms[i].rotation);
-
-            const auto write_polygon = [&tracking](const Polygon& points) {
-                tracking << "[";
-                for (std::size_t j = 0; j < points.size(); ++j) {
-                    if (j) tracking << ",";
-                    tracking << "[" << points[j][0] << "," << points[j][1] << "]";
-                }
-                tracking << "]";
-            };
-            tracking << "{\"box\":";
-            write_polygon(box);
-            tracking << ",\"rotated_box\":";
-            write_polygon(rotated);
-            tracking << "}";
-        }
-
-        // serialise frame relative hand landmark coordinates
-        tracking << "],\"hands\":[";
-        for (std::size_t i = 0; i < hands.size(); ++i) {
-            if (i) tracking << ",";
-            tracking << "{\"landmarks\":[";
-            for (std::size_t point = 0; point < 21; ++point) {
-                if (point) tracking << ",";
-                tracking << "[" << hands[i].frame_xy[point * 2] << "," << hands[i].frame_xy[point * 2 + 1] << "]";
-            }
-            tracking << "]}";
-        }
-        tracking << "]}";
-        web_server.publish_tracking(tracking.str());
-/*
-        if (now - report_time >= std::chrono::seconds(1)) {
-            const double seconds = std::chrono::duration<double>(now - report_time).count();
-            std::cout << "Inference rates: palms " << palm_runs / seconds << " Hz, landmarks " << landmark_runs / seconds << " Hz" << std::endl;
-            palm_runs = 0;
-            landmark_runs = 0;
-            report_time = now;
-        }
-*/
+        web_server.publish_tracking(
+            make_tracking_json(palms, hands, width, height));
     }
 
     running.store(false);
-    frame_ready.notify_all();
+    frame_mailbox.stop();
     capture_thread.join();
 
     return 0;
