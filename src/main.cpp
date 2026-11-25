@@ -115,6 +115,7 @@ int main() {
     RecognitionScheduler scheduler(palm_interval, landmark_interval);
     std::vector<PalmDetection> palms;
     std::vector<HandLandmarkResult> hands;
+    // auto last_tracking_log = std::chrono::steady_clock::now();
 
     // infer at bounded rates on the newest captured frame, skipping stale frames
     std::uint64_t processed_sequence = 0;
@@ -147,8 +148,14 @@ int main() {
             }
         }
 
-        web_server.publish_tracking(
-            make_tracking_json(palms, hands, width, height));
+        web_server.publish_tracking(make_tracking_json(palms, hands, width, height));
+
+        // const auto now = std::chrono::steady_clock::now();
+        // if (now - last_tracking_log >= std::chrono::seconds(1)) {
+        //     std::cout << "[tracking] palms=" << palms.size()
+        //               << " hands=" << hands.size() << std::endl;
+        //     last_tracking_log = now;
+        // }
     }
 
     running.store(false);
