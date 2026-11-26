@@ -65,9 +65,22 @@ function showSavedGestures() {
     savedGesturesElement.replaceChildren();
 
     for (const gesture of loadSavedGestures()) {
-        const item = document.createElement('p');
-        item.textContent = gesture.name;
+        const item = document.createElement('div');
+        const preview = document.createElement('canvas');
+        const name = document.createElement('p');
+        preview.width = 128;
+        preview.height = 128;
+        preview.style.background = '#111111';
+        name.textContent = gesture.name;
+        item.appendChild(preview);
+        item.appendChild(name);
         savedGesturesElement.appendChild(item);
+
+        const previewContext = preview.getContext('2d');
+        for (const vector of gesture.vectors || []) {
+            const points = getPhotographPoints(vector);
+            drawHandPoints(previewContext, preview.width, preview.height, points, 'blue', 'green');
+        }
     }
 }
 
