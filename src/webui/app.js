@@ -6,6 +6,11 @@ const confidenceInputs = {
     landmark: document.querySelector('#landmark-confidence')
 };
 let confidenceTimer;
+let cameraControlTimer;
+const cameraControls = {
+    exposure: document.querySelector('#exposure-control'),
+    gain: document.querySelector('#gain-control')
+};
 
 // load current thresholds, display changes, send slider updates
 async function loadConfidence() {
@@ -27,6 +32,34 @@ async function loadConfidence() {
             }, 100);
         });
     }
+}
+
+async function loadCameraControls() {
+    const response = await fetch('/camera-controls');
+    const values = await response.json();
+    cameraControls.exposure.min = values.exposure_min;
+    cameraControls.exposure.max = values.exposure_max;
+    cameraControls.gain.min = values.gain_min;
+    cameraControls.gain.max = values.gain_max;
+
+    for (const [name, input] of Object.entries(cameraControls)) {
+        input.value = values[name];
+        document.querySelector(`#${name}-value`).value = values[name];
+        input.addEventListener('input', () => {
+            document.querySelector(`#${name}-value`).value = input.value;
+            clearTimeout(cameraControlTimer);
+            cameraControlTimer = setTimeout(saveCameraControls, 100);
+        });
+    }
+}
+
+async function saveCameraControls() {
+    const query = new URLSearchParams({
+        exposure: cameraControls.exposure.value,
+        gain: cameraControls.gain.value
+    });
+    const response = await fetch(`/camera-controls?${query}`, { method: 'POST' });
+    if (!response.ok) console.error('[gestured] camera controls failed', response.status);
 }
 
 let tracking = { palms: [], hands: [] };
@@ -114,3 +147,4 @@ image.src = "/stream.mjpg";
 //updateFrame();
 updateTracking();
 loadConfidence();
+loadCameraControls();

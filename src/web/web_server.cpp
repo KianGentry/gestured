@@ -10,11 +10,13 @@
 
 struct WebServer::State {
     // keep port, shared snapshot, server, worker in one owned state
-    State(std::uint16_t selected_port, TrackerConfidence& shared_confidence)
-        : port(selected_port), confidence(shared_confidence) {}
+    State(std::uint16_t selected_port, TrackerConfidence& shared_confidence, CameraControls& shared_controls, const CameraControlRanges& shared_ranges)
+        : port(selected_port), confidence(shared_confidence), controls(shared_controls), ranges(shared_ranges) {}
 
     std::uint16_t port;
     TrackerConfidence& confidence;
+    CameraControls& controls;
+    CameraControlRanges ranges;
     std::mutex mutex;
     WebSnapshot latest;
     httplib::Server server;
@@ -95,12 +97,40 @@ struct WebServer::State {
                 response.status = 400;
             }
         });
+
+        server.Get("/camera-controls", [this](const httplib::Request&, httplib::Response& response) {
+            std::ostringstream json;
+            json << "{\"exposure\":" << controls.exposure.load()
+                 << ",\"gain\":" << controls.gain.load()
+                 << ",\"exposure_min\":" << ranges.exposure.minimum
+                 << ",\"exposure_max\":" << ranges.exposure.maximum
+                 << ",\"gain_min\":" << ranges.gain.minimum
+                 << ",\"gain_max\":" << ranges.gain.maximum << "}";
+            response.set_content(json.str(), "application/json");
+        });
+
+        server.Post("/camera-controls", [this](const httplib::Request& request, httplib::Response& response) {
+            try {
+                const int exposure = std::stoi(request.get_param_value("exposure"));
+                const int gain = std::stoi(request.get_param_value("gain"));
+                if (exposure < ranges.exposure.minimum || exposure > ranges.exposure.maximum ||
+                    gain < ranges.gain.minimum || gain > ranges.gain.maximum) {
+                    response.status = 400;
+                    return;
+                }
+                controls.exposure.store(exposure);
+                controls.gain.store(gain);
+                response.status = 204;
+            } catch (const std::exception&) {
+                response.status = 400;
+            }
+        });
     }
 
 };
 
-WebServer::WebServer(TrackerConfidence& confidence, std::uint16_t port)
-    : state_(std::make_unique<State>(port, confidence)) {}
+WebServer::WebServer(TrackerConfidence& confidence, CameraControls& controls, const CameraControlRanges& ranges, std::uint16_t port)
+    : state_(std::make_unique<State>(port, confidence, controls, ranges)) {}
 
 WebServer::~WebServer() {
     // stop the worker before releasing server state

@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <condition_variable>
+#include "vision/camera_v4l2.hpp"
 #include "vision/tracker_confidence.hpp"
 
 struct WebSnapshot {
@@ -14,7 +15,7 @@ struct WebSnapshot {
 
 class WebServer {
 public:
-    explicit WebServer(TrackerConfidence& confidence, std::uint16_t port = 2026);
+    explicit WebServer(TrackerConfidence& confidence, CameraControls& controls, const CameraControlRanges& ranges, std::uint16_t port = 2026);
     ~WebServer();
 
     WebServer(const WebServer&) = delete;

@@ -362,3 +362,33 @@ bool Camera::set_gain(int gain) {
     control.value = gain;
     return ioctl(fd_, VIDIOC_S_CTRL, &control) == 0;
 }
+
+bool Camera::get_control_ranges(CameraControlRanges& ranges) {
+    const auto query = [this](std::uint32_t id, CameraControlRange& range) {
+        v4l2_queryctrl control{};
+        control.id = id;
+        if (ioctl(fd_, VIDIOC_QUERYCTRL, &control) < 0) return false;
+        range = {
+            control.minimum,
+            control.maximum,
+            control.default_value
+        };
+        return true;
+    };
+
+    return query(V4L2_CID_EXPOSURE_ABSOLUTE, ranges.exposure) &&
+        query(V4L2_CID_GAIN, ranges.gain);
+}
+
+bool Camera::get_controls(int& exposure, int& gain) {
+    const auto get = [this](std::uint32_t id, int& value) {
+        v4l2_control control{};
+        control.id = id;
+        if (ioctl(fd_, VIDIOC_G_CTRL, &control) < 0) return false;
+        value = control.value;
+        return true;
+    };
+
+    return get(V4L2_CID_EXPOSURE_ABSOLUTE, exposure) &&
+        get(V4L2_CID_GAIN, gain);
+}

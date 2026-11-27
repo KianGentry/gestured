@@ -50,8 +50,16 @@ int main() {
     std::cout << "Using " << settings.width << "x" 
     << settings.height << " at " << settings.fps << "fps" << std::endl;
 
-    // keep shared thresholds alive, tracker and web server hold references
+    // keep shared settings alive, tracker, capture, and web server hold references
     TrackerConfidence confidence;
+    CameraControls camera_controls;
+    CameraControlRanges camera_control_ranges;
+    if (!camera.get_control_ranges(camera_control_ranges)) {
+        std::cerr << "Failed to read camera control ranges" << std::endl;
+        return 1;
+    }
+    camera_controls.exposure.store(camera_control_ranges.exposure.default_value);
+    camera_controls.gain.store(camera_control_ranges.gain.default_value);
     // load the palm detector, load the landmark model
     OnnxTracker tracker(
         "models/palm_detection_full_inf_post_192x192.onnx",
@@ -75,18 +83,6 @@ int main() {
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
 
-    // set manual exposure, reduce motion blur
-    if (!camera.set_manual_exposure(200)) {
-        std::cerr << "Failed to set manual exposure" << std::endl;
-        return 1;
-    }
-
-    // set manual gain, brighten the image
-    if (!camera.set_gain(63)) {
-        std::cerr << "Failed to set gain" << std::endl;
-        return 1;
-    }
-
     // queue camera buffers, start continuous capture
     if (!camera.start_streaming()) {
         std::cerr << "Failed to start camera stream" << std::endl;
@@ -94,7 +90,7 @@ int main() {
     }
 
     // serve the web ui, expose frame and tracking routes
-    WebServer web_server(confidence, 2026);
+    WebServer web_server(confidence, camera_controls, camera_control_ranges, 2026);
     if (!web_server.start()) {
         std::cerr << "Failed to start web server on http://127.0.0.1:2026" << std::endl;
         return 1;
@@ -108,6 +104,7 @@ int main() {
         std::ref(camera),
         std::ref(web_server),
         std::ref(frame_mailbox),
+        std::ref(camera_controls),
         std::ref(running));
 
     constexpr auto palm_interval = std::chrono::milliseconds(75); // 13 Hz

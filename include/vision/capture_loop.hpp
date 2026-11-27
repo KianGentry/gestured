@@ -10,4 +10,5 @@ void capture_frames(
     Camera& camera,
     WebServer& web_server,
     FrameMailbox& frame_mailbox,
+    CameraControls& controls,
     std::atomic<bool>& running);
